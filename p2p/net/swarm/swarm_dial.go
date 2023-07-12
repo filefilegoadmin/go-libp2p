@@ -304,12 +304,9 @@ func (s *Swarm) addrsForDial(ctx context.Context, p peer.ID) ([]ma.Multiaddr, er
 		return nil, err
 	}
 
-	goodAddrs := s.filterKnownUndialables(ctx, p, resolved)
-	if forceDirect, _ := network.GetForceDirectDial(ctx); forceDirect {
-		goodAddrs = ma.FilterAddrs(goodAddrs, s.nonProxyAddr)
-	}
+	forceDirect, _ := network.GetForceDirectDial(ctx)
+	goodAddrs := s.filterKnownUndialables(p, resolved, forceDirect)
 	goodAddrs = network.DedupAddrs(goodAddrs)
-
 	if len(goodAddrs) == 0 {
 		return nil, ErrNoGoodAddresses
 	}
@@ -394,10 +391,11 @@ func (s *Swarm) nonProxyAddr(addr ma.Multiaddr) bool {
 // filterKnownUndialables takes a list of multiaddrs, and removes those
 // that we definitely don't want to dial: addresses configured to be blocked,
 // IPv6 link-local addresses, addresses without a dial-capable transport,
-// addresses that we know to be our own, and addresses with a better tranport
-// available. This is an optimization to avoid wasting time on dials that we
-// know are going to fail or for which we have a better alternative.
-func (s *Swarm) filterKnownUndialables(ctx context.Context, p peer.ID, addrs []ma.Multiaddr) []ma.Multiaddr {
+// addresses that we know to be our own, addresses with a better tranport
+// available, addresses on backoff, etc. This is an optimization to avoid
+// wasting time on dials that we know are going to fail or for which we
+// have a better alternative.
+func (s *Swarm) filterKnownUndialables(p peer.ID, addrs []ma.Multiaddr, forceDirect bool) []ma.Multiaddr {
 	lisAddrs, _ := s.InterfaceListenAddresses()
 	var ourAddrs []ma.Multiaddr
 	for _, addr := range lisAddrs {
@@ -409,7 +407,6 @@ func (s *Swarm) filterKnownUndialables(ctx context.Context, p peer.ID, addrs []m
 			return false
 		})
 	}
-	forceDirect, _ := network.GetForceDirectDial(ctx)
 
 	// The order of these two filters is important. If we can only dial /webtransport,
 	// we don't want to filter /webtransport addresses out because the peer had a /quic-v1
@@ -424,6 +421,7 @@ func (s *Swarm) filterKnownUndialables(ctx context.Context, p peer.ID, addrs []m
 
 	return ma.FilterAddrs(addrs,
 		func(addr ma.Multiaddr) bool { return forceDirect || !s.backf.Backoff(p, addr) },
+		func(addr ma.Multiaddr) bool { return !forceDirect || s.nonProxyAddr(addr) },
 		func(addr ma.Multiaddr) bool { return !ma.Contains(ourAddrs, addr) },
 		// TODO: Consider allowing link-local addresses
 		func(addr ma.Multiaddr) bool { return !manet.IsIP6LinkLocal(addr) },
