@@ -306,7 +306,8 @@ func (s *Swarm) addrsForDial(ctx context.Context, p peer.ID) ([]ma.Multiaddr, er
 
 	forceDirect, _ := network.GetForceDirectDial(ctx)
 	goodAddrs := s.filterKnownUndialables(p, resolved, forceDirect)
-	goodAddrs = network.DedupAddrs(goodAddrs)
+	goodAddrs = ma.Unique(goodAddrs)
+
 	if len(goodAddrs) == 0 {
 		return nil, ErrNoGoodAddresses
 	}
